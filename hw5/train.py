@@ -77,8 +77,8 @@ def main(options):
   else:
     nmt.cpu()
 
-  if options.load_pretrain:
-    nmt.load_param(options.load_pretrain)
+  #if options.load_pretrain:
+  #  nmt.load_param(options.load_pretrain)
 
   criterion = torch.nn.NLLLoss()
   optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
@@ -87,7 +87,6 @@ def main(options):
   last_dev_avg_loss = float("inf")
   for epoch_i in range(options.epochs):
     logging.info("At {0}-th epoch.".format(epoch_i))
-    '''
     # srange generates a lazy sequence of shuffled range
     nmt.train()
     for i, batch_i in enumerate(utils.rand.srange(len(batched_train_src))):
@@ -122,7 +121,6 @@ def main(options):
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
-    '''
     nmt.eval()
     # validation -- this is a crude esitmation because there might be some paddings at the end
     dev_loss = 0.0
@@ -143,8 +141,8 @@ def main(options):
         dev_src_mask,
         dev_trg_mask
       )  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
-      dev_trg_mask = dev_trg_mask.view(-1)
-      dev_trg_batch = dev_trg_batch.view(-1)
+      dev_trg_mask = dev_trg_mask[1:].view(-1)
+      dev_trg_batch = dev_trg_batch[1:].view(-1)
       dev_trg_batch = dev_trg_batch.masked_select(dev_trg_mask)
       dev_trg_mask = dev_trg_mask.unsqueeze(1).expand(len(dev_trg_mask), trg_vocab_size)
       sys_out_batch = sys_out_batch.view(-1, trg_vocab_size)
