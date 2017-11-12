@@ -8,8 +8,8 @@ import logging
 import torch
 from torch import cuda
 from torch.autograd import Variable
-# from model import NMT
-from example_module import NMT
+from model import NMT
+#from example_module import NMT
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)s: %(message)s',
@@ -24,7 +24,9 @@ parser.add_argument("--trg_lang", default="en",
                     help="Target Language. (default = en)")
 parser.add_argument("--model_file", required=True,
                     help="Location to dump the models.")
-parser.add_argument("--batch_size", default=1, type=int,
+parser.add_argument("--load_pretrain", required=False,
+                    help="Location to load trained the models.")
+parser.add_argument("--batch_size", default=32, type=int,
                     help="Batch size for training. (default=1)")
 parser.add_argument("--epochs", default=20, type=int,
                     help="Epochs through the data. (default=20)")
@@ -38,6 +40,7 @@ parser.add_argument("--estop", default=1e-2, type=float,
                     help="Early stopping criteria on the development set. (default=1e-2)")
 parser.add_argument("--gpuid", default=[], nargs='+', type=int,
                     help="ID of gpu device to use. Empty implies cpu usage.")
+
 # feel free to add more arguments as you need
 
 def main(options):
@@ -53,14 +56,29 @@ def main(options):
   batched_train_trg, batched_train_trg_mask = utils.tensor.advanced_batchize_no_sort(trg_train, options.batch_size, trg_vocab.stoi["<blank>"], sort_index)
   batched_dev_src, batched_dev_src_mask, sort_index = utils.tensor.advanced_batchize(src_dev, options.batch_size, src_vocab.stoi["<blank>"])
   batched_dev_trg, batched_dev_trg_mask = utils.tensor.advanced_batchize_no_sort(trg_dev, options.batch_size, trg_vocab.stoi["<blank>"], sort_index)
-
+  #mport pdb; pdb.set_trace()
+  #print(batched_train_src[0].size())
   trg_vocab_size = len(trg_vocab)
+  src_vocab_size = len(src_vocab)
 
-  nmt = NMT(trg_vocab_size) # TODO: add more arguments as necessary 
+  #print trg_vocab_size
+  #print src_vocab_size
+
+  opts = {
+    'src_voc_size' : len(src_vocab),
+    'trg_voc_size' : len(trg_vocab),
+    'dim_rnn' : 512,
+    'dim_emb' : 300,
+    'dropout' : 0.2
+  }
+  nmt = NMT(opts) # TODO: add more arguments as necessary 
   if use_cuda > 0:
     nmt.cuda()
   else:
     nmt.cpu()
+
+  if options.load_pretrain:
+    nmt.load_param(options.load_pretrain)
 
   criterion = torch.nn.NLLLoss()
   optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
@@ -69,21 +87,32 @@ def main(options):
   last_dev_avg_loss = float("inf")
   for epoch_i in range(options.epochs):
     logging.info("At {0}-th epoch.".format(epoch_i))
+    '''
     # srange generates a lazy sequence of shuffled range
+    nmt.train()
     for i, batch_i in enumerate(utils.rand.srange(len(batched_train_src))):
       train_src_batch = Variable(batched_train_src[batch_i])  # of size (src_seq_len, batch_size)
       train_trg_batch = Variable(batched_train_trg[batch_i])  # of size (src_seq_len, batch_size)
       train_src_mask = Variable(batched_train_src_mask[batch_i])
       train_trg_mask = Variable(batched_train_trg_mask[batch_i])
+      #print train_src_batch
+      #print train_src_mask
       if use_cuda:
         train_src_batch = train_src_batch.cuda()
         train_trg_batch = train_trg_batch.cuda()
         train_src_mask = train_src_mask.cuda()
         train_trg_mask = train_trg_mask.cuda()
 
-      sys_out_batch = nmt(train_trg_batch)  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
-      train_trg_mask = train_trg_mask.view(-1)
-      train_trg_batch = train_trg_batch.view(-1)
+      sys_out_batch = nmt.forward(
+        train_src_batch,
+        train_trg_batch,
+        train_src_mask,
+        train_trg_mask
+      )  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
+      print train_trg_mask.size()
+
+      train_trg_mask = train_trg_mask[1:].view(-1)
+      train_trg_batch = train_trg_batch[1:].view(-1)
       train_trg_batch = train_trg_batch.masked_select(train_trg_mask)
       train_trg_mask = train_trg_mask.unsqueeze(1).expand(len(train_trg_mask), trg_vocab_size)
       sys_out_batch = sys_out_batch.view(-1, trg_vocab_size)
@@ -93,7 +122,8 @@ def main(options):
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
-
+    '''
+    nmt.eval()
     # validation -- this is a crude esitmation because there might be some paddings at the end
     dev_loss = 0.0
     for batch_i in range(len(batched_dev_src)):
@@ -107,7 +137,12 @@ def main(options):
         dev_src_mask = dev_src_mask.cuda()
         dev_trg_mask = dev_trg_mask.cuda()
 
-      sys_out_batch = nmt(dev_trg_batch)  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
+      sys_out_batch = nmt.forward(
+        dev_src_batch,
+        dev_trg_batch,
+        dev_src_mask,
+        dev_trg_mask
+      )  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
       dev_trg_mask = dev_trg_mask.view(-1)
       dev_trg_batch = dev_trg_batch.view(-1)
       dev_trg_batch = dev_trg_batch.masked_select(dev_trg_mask)

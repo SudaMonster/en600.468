@@ -3,6 +3,8 @@ origin_data="../../../mt-hw5-data"
 nmt_path=".."
 mkdir -p data
 
+source activate NeuralHawkes
+
 python ${nmt_path}/preprocess.py \
     --train_file ${origin_data}/trn.de \
     --dev_file ${origin_data}/dev.de \
@@ -15,4 +17,5 @@ python ${nmt_path}/preprocess.py \
     --dev_file ${origin_data}/dev.en \
     --test_file ${origin_data}/devtest.fake.en \
     --vocab_file ${origin_data}/model.trg.vocab \
-    --data_file ./data/hw5.en
+    --data_file ./data/hw5.en \
+    --charniak 

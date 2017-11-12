@@ -35,34 +35,41 @@ def advanced_batchize(data, batch_size, pad_index):
   :return [(seq_len, batch_size)], order of sorted data
   """
   # rank by data length
-  sorted_data = sorted(data, key=lambda sent: len(sent))
-  sort_index = sorted(range(len(data)), key=lambda k: len(data[k]))
+  sorted_data = sorted(data, key=lambda sent: len(sent))[::-1]
+  sort_index = sorted(range(len(data)), key=lambda k: len(data[k]))[::-1]
   batchized_data = []
   batchized_mask = []
+  batchized_lens = []
   # except for last batch
   for start_i in range(0, len(sorted_data) - batch_size, batch_size):
     batch_data = sorted_data[start_i: start_i + batch_size]
-    seq_len = len(batch_data[-1])
+    seq_len = len(batch_data[0])
     batch_tensor = (torch.ones((seq_len, batch_size)) * pad_index).long()
     mask_tensor = torch.zeros((seq_len, batch_size)).byte()
+    #lens = []
     for idx, sent_data in enumerate(batch_data):
       # batch_tensor[:, idx] = truncate_or_pad(sent_data, 0, seq_len, pad_index=pad_index)
       batch_tensor[0:len(sent_data), idx] = sent_data
       mask_tensor[0:len(sent_data), idx] = 1
+      #lens.append(len(sent_data))
     batchized_data.append(batch_tensor)
     batchized_mask.append(mask_tensor)
+    #batchized_lens.append(torch.sum(mask_tensor,dim=1))
 
   # last batch
   if len(sorted_data) % batch_size != 0:
     batch_data = sorted_data[len(sorted_data) // batch_size * batch_size:]
-    seq_len = len(batch_data[-1])
+    seq_len = len(batch_data[0])
     batch_tensor = (torch.ones((seq_len, batch_size)) * pad_index).long()
     mask_tensor = torch.zeros((seq_len, batch_size)).byte()
+    #lens = []
     for idx, sent_data in enumerate(batch_data):
       batch_tensor[0:len(sent_data), idx] = sent_data
       mask_tensor[0:len(sent_data), idx] = 1
+      #lens.append(len(sent_data))
     batchized_data.append(batch_tensor)
     batchized_mask.append(mask_tensor)
+    #batchized_lens.append(torch.sum(mask_tensor,dim=1))
   return batchized_data, batchized_mask, sort_index
 
 def advanced_batchize_no_sort(data, batch_size, pad_index, order=None):
