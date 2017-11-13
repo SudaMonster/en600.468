@@ -8,6 +8,7 @@ import logging
 import torch
 from torch import cuda
 from torch.autograd import Variable
+import math
 from model import NMT
 #from example_module import NMT
 
@@ -77,8 +78,8 @@ def main(options):
   else:
     nmt.cpu()
 
-  #if options.load_pretrain:
-  #  nmt.load_param(options.load_pretrain)
+  if options.load_pretrain:
+    nmt.load_param(options.load_pretrain)
 
   criterion = torch.nn.NLLLoss()
   optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
@@ -118,6 +119,7 @@ def main(options):
       sys_out_batch = sys_out_batch.masked_select(train_trg_mask).view(-1, trg_vocab_size)
       loss = criterion(sys_out_batch, train_trg_batch)
       logging.debug("loss at batch {0}: {1}".format(i, loss.data[0]))
+      logging.debug("perplexity at batch {0}: {1}".format(i, math.exp(loss.data[0])))
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()
