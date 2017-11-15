@@ -1,3 +1,4 @@
 hw5/experiment/data/
 hw5/experiment/model/
+hw5/experiment/log-qsub/
 *.pyc

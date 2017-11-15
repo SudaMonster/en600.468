@@ -71,13 +71,21 @@ class GlobalAttention(nn.Module):
         
         #print(seq_context_after_liner.size())
         #print(prev_hidden.size())
-        seq_score = torch.sum(
-            seq_context_after_liner * prev_hidden[None, :, :],
-            dim=2
+        #import pdb; pdb.set_trace()
+        seq_score = torch.exp(
+            torch.sum(
+                seq_context_after_liner * prev_hidden[None, :, :],
+                dim=2
+            )
         )
         #print(seq_score.size())
         seq_score = seq_score * src_mask.float()
-        seq_score_norm = seq_score / torch.sum(seq_score, dim=0, keepdim=True)
+
+        
+        seq_score_sum = torch.sum(seq_score, dim=0, keepdim=True)
+        seq_score_sum[seq_score_sum == 0] = 1
+
+        seq_score_norm = seq_score / seq_score_sum
 
         # seq_context shape [seq_len, batch_size, dim_model * 2]
         #print(seq_score_norm.unsqueeze(2).size())
@@ -112,10 +120,11 @@ class Generater(nn.Module):
             opts['trg_voc_size']
         )
 
+    '''
     def log_softmax(self, input_tensor):
         input_max, _ = torch.max(input_tensor, dim=2, keepdim=True)
         logsumexp_term = torch.log(
-            torch.sum(
+            1e-9 + torch.sum(
                 torch.exp(
                     input_tensor - input_max,
                     ),
@@ -124,9 +133,10 @@ class Generater(nn.Module):
                 )
             ) + input_max
         return input_tensor - logsumexp_term
-    
+    '''
     def forward(self, input_tensor):
-        return self.log_softmax(
+        assert len(input_tensor.size()) == 2
+        return nn.functional.log_softmax(
             self.generate_linear(
                 input_tensor
             )
@@ -219,7 +229,16 @@ class Decoder(nn.Module):
             dim=2
         )[0]
 
+        prev_c = torch.cat(
+            [
+                prev_c[0:prev_c.size(0):2], 
+                prev_c[1:prev_c.size(0):2]
+            ], 
+            dim=2
+        )[0]
+
         h_list = []
+        log_prob_list = []
         #print(prev_h.size())
         for i in range(1, max_len_trg):
             atten = self.attn_layer(
@@ -239,13 +258,18 @@ class Decoder(nn.Module):
             #print(lstm_input.size())
             prev_h = self.dropout(prev_h)
             prev_c = self.dropout(prev_c)
+            #print(prev_c.size())
+            #print(prev_h.size())
+            #print(lstm_input.size())
             prev_h, prev_c = self.lstm_cell(lstm_input, (prev_h, prev_c))
             
-            h_list.append(prev_h.unsqueeze(0))
+            #h_list.append(prev_h.unsqueeze(0))
+            log_prob_list.append(self.generator(prev_h).unsqueeze(0))
         
-        seq_hidden_trg = torch.cat(h_list, dim=0)
+        seq_trg_log_prob = torch.cat(log_prob_list, dim=0)
+        #seq_hidden_trg = torch.cat(h_list, dim=0)
         
-        seq_trg_log_prob = self.generator(seq_hidden_trg)
+        #seq_trg_log_prob = self.generator(seq_hidden_trg)
 
         return seq_trg_log_prob
     
@@ -255,9 +279,6 @@ class NMT(nn.Module):
         super(NMT, self).__init__()
         self.encoder = Encoder(opts)
         self.decoder = Decoder(opts)
-    
-    def load_param(self,):
-        pass
     
     def forward(self,         
         src_batch,

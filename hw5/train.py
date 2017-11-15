@@ -27,7 +27,7 @@ parser.add_argument("--model_file", required=True,
                     help="Location to dump the models.")
 parser.add_argument("--load_pretrain", required=False,
                     help="Location to load trained the models.")
-parser.add_argument("--batch_size", default=32, type=int,
+parser.add_argument("--batch_size", default=64, type=int,
                     help="Batch size for training. (default=1)")
 parser.add_argument("--epochs", default=20, type=int,
                     help="Epochs through the data. (default=20)")
@@ -47,6 +47,7 @@ parser.add_argument("--gpuid", default=[], nargs='+', type=int,
 def main(options):
 
   use_cuda = (len(options.gpuid) >= 1)
+
   if options.gpuid:
     cuda.set_device(options.gpuid[0])
 
@@ -62,6 +63,12 @@ def main(options):
   trg_vocab_size = len(trg_vocab)
   src_vocab_size = len(src_vocab)
 
+  #print batched_train_src_mask[195]
+  #print batched_train_trg_mask[195]
+  #raw_input()
+  #print batched_train_src_mask[195]
+  #print batched_train_trg_mask[195]
+
   #print trg_vocab_size
   #print src_vocab_size
 
@@ -73,13 +80,15 @@ def main(options):
     'dropout' : 0.2
   }
   nmt = NMT(opts) # TODO: add more arguments as necessary 
+
+  if options.load_pretrain:
+    nmt.load_param(options.load_pretrain)
+
   if use_cuda > 0:
     nmt.cuda()
   else:
     nmt.cpu()
 
-  if options.load_pretrain:
-    nmt.load_param(options.load_pretrain)
 
   criterion = torch.nn.NLLLoss()
   optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
@@ -109,7 +118,7 @@ def main(options):
         train_src_mask,
         train_trg_mask
       )  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
-      print train_trg_mask.size()
+      #print train_trg_mask.size()
 
       train_trg_mask = train_trg_mask[1:].view(-1)
       train_trg_batch = train_trg_batch[1:].view(-1)
@@ -118,11 +127,13 @@ def main(options):
       sys_out_batch = sys_out_batch.view(-1, trg_vocab_size)
       sys_out_batch = sys_out_batch.masked_select(train_trg_mask).view(-1, trg_vocab_size)
       loss = criterion(sys_out_batch, train_trg_batch)
-      logging.debug("loss at batch {0}: {1}".format(i, loss.data[0]))
-      logging.debug("perplexity at batch {0}: {1}".format(i, math.exp(loss.data[0])))
+      logging.debug("loss at batch {0} ({2}): {1}".format(i, loss.data[0], batch_i))
+      #logging.debug("perplexity at batch {0}: {1}".format(i, math.exp(loss.data[0])))
       optimizer.zero_grad()
       loss.backward()
+      torch.nn.utils.clip_grad_norm(nmt.parameters(), 2)
       optimizer.step()
+    
     nmt.eval()
     # validation -- this is a crude esitmation because there might be some paddings at the end
     dev_loss = 0.0
@@ -152,7 +163,7 @@ def main(options):
       loss = criterion(sys_out_batch, dev_trg_batch)
       logging.debug("dev loss at batch {0}: {1}".format(batch_i, loss.data[0]))
       dev_loss += loss
-    dev_avg_loss = dev_loss / len(batched_dev_in)
+    dev_avg_loss = dev_loss / len(batched_dev_src)
     logging.info("Average loss value per instance is {0} at the end of epoch {1}".format(dev_avg_loss.data[0], epoch_i))
 
     if (last_dev_avg_loss - dev_avg_loss).data[0] < options.estop:
