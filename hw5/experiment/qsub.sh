@@ -1,6 +1,6 @@
 #!/bin/bash -v
 mkdir -p log-qsub
-qsub -l 'hostname=c*|b1[123456789]*,gpu=1' \
+qsub -l 'hostname=b1[123456789]*,gpu=1' \
   -cwd \
   -j y \
   -v PATH \

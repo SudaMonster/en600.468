@@ -90,8 +90,17 @@ def main(options):
     nmt.cpu()
 
 
+  
   criterion = torch.nn.NLLLoss()
-  optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
+  if options.optimizer == 'Adam':
+    optimizer = torch.optim.Adam(
+            params=nmt.parameters(), 
+            lr=options.learning_rate, 
+            eps=1e-3
+        )
+  else:
+    optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
+
 
   # main training loop
   last_dev_avg_loss = float("inf")
@@ -131,7 +140,7 @@ def main(options):
       #logging.debug("perplexity at batch {0}: {1}".format(i, math.exp(loss.data[0])))
       optimizer.zero_grad()
       loss.backward()
-      torch.nn.utils.clip_grad_norm(nmt.parameters(), 2)
+      #torch.nn.utils.clip_grad_norm(nmt.parameters(), 2)
       optimizer.step()
     
     nmt.eval()
