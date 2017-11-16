@@ -27,7 +27,7 @@ parser.add_argument("--model_file", required=True,
                     help="Location to dump the models.")
 parser.add_argument("--load_pretrain", required=False,
                     help="Location to load trained the models.")
-parser.add_argument("--batch_size", default=64, type=int,
+parser.add_argument("--batch_size", default=32, type=int,
                     help="Batch size for training. (default=1)")
 parser.add_argument("--epochs", default=20, type=int,
                     help="Epochs through the data. (default=20)")
@@ -84,6 +84,7 @@ def main(options):
   if options.load_pretrain:
     nmt.load_param(options.load_pretrain)
 
+  
   if use_cuda > 0:
     nmt.cuda()
   else:
@@ -101,7 +102,8 @@ def main(options):
   else:
     optimizer = eval("torch.optim." + options.optimizer)(nmt.parameters(), options.learning_rate)
 
-
+  print nmt.decode(src_test[0], trg_vocab)
+  
   # main training loop
   last_dev_avg_loss = float("inf")
   for epoch_i in range(options.epochs):
@@ -109,6 +111,7 @@ def main(options):
     # srange generates a lazy sequence of shuffled range
     nmt.train()
     for i, batch_i in enumerate(utils.rand.srange(len(batched_train_src))):
+      batch_i = 2750
       train_src_batch = Variable(batched_train_src[batch_i])  # of size (src_seq_len, batch_size)
       train_trg_batch = Variable(batched_train_trg[batch_i])  # of size (src_seq_len, batch_size)
       train_src_mask = Variable(batched_train_src_mask[batch_i])
@@ -129,8 +132,8 @@ def main(options):
       )  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
       #print train_trg_mask.size()
 
-      train_trg_mask = train_trg_mask[1:].view(-1)
-      train_trg_batch = train_trg_batch[1:].view(-1)
+      train_trg_mask = train_trg_mask[:-1].view(-1)
+      train_trg_batch = train_trg_batch[:-1].view(-1)
       train_trg_batch = train_trg_batch.masked_select(train_trg_mask)
       train_trg_mask = train_trg_mask.unsqueeze(1).expand(len(train_trg_mask), trg_vocab_size)
       sys_out_batch = sys_out_batch.view(-1, trg_vocab_size)
@@ -163,8 +166,8 @@ def main(options):
         dev_src_mask,
         dev_trg_mask
       )  # (trg_seq_len, batch_size, trg_vocab_size) # TODO: add more arguments as necessary 
-      dev_trg_mask = dev_trg_mask[1:].view(-1)
-      dev_trg_batch = dev_trg_batch[1:].view(-1)
+      dev_trg_mask = dev_trg_mask[:-1].view(-1)
+      dev_trg_batch = dev_trg_batch[:-1].view(-1)
       dev_trg_batch = dev_trg_batch.masked_select(dev_trg_mask)
       dev_trg_mask = dev_trg_mask.unsqueeze(1).expand(len(dev_trg_mask), trg_vocab_size)
       sys_out_batch = sys_out_batch.view(-1, trg_vocab_size)
@@ -174,6 +177,7 @@ def main(options):
       dev_loss += loss
     dev_avg_loss = dev_loss / len(batched_dev_src)
     logging.info("Average loss value per instance is {0} at the end of epoch {1}".format(dev_avg_loss.data[0], epoch_i))
+    
 
     if (last_dev_avg_loss - dev_avg_loss).data[0] < options.estop:
       logging.info("Early stopping triggered with threshold {0} (previous dev loss: {1}, current: {2})".format(epoch_i, last_dev_avg_loss.data[0], dev_avg_loss.data[0]))

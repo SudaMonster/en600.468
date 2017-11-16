@@ -10,6 +10,7 @@ from torch import cuda
 from torch.autograd import Variable
 import math
 from model import NMT
+import sys
 #from example_module import NMT
 
 logging.basicConfig(
@@ -49,69 +50,14 @@ def main(options):
     
     nmt.eval()
   
-    for sentece in src_test:
-        
-        seq_context, final_states = nmt.encoder(sentece)
-        
-        seq_context_after_liner = nmt.decoder.linear_in(seq_context)
-        
-        prev_h , prev_c = final_states
+   
+    for src_sent in src_test:
+        trans_sent = nmt.decode(src_sent, trg_vocab)
 
-        prev_h = torch.cat(
-            [
-                prev_h[0:prev_h.size(0):2], 
-                prev_h[1:prev_h.size(0):2]
-            ], 
-            dim=2
-        )[0]
+    with open(options.output, 'a+') as f:
+        f.write(' '.join(trans_sent) + '\n')
 
-        prev_c = torch.cat(
-            [
-                prev_c[0:prev_c.size(0):2], 
-                prev_c[1:prev_c.size(0):2]
-            ], 
-            dim=2
-        )[0]
-
-
-        prev_word = '<s>'
-
-        word_list = []
-        
-        while i < max_len:
-            pre_emb = nmt.decoder.embedding(pre_v)
-            atten = nmt.decoder.attn_layer(
-                seq_context,
-                seq_context_after_liner, 
-                ones,
-                prev_h
-            )
-            
-            lstm_input = torch.cat(
-                [
-                    prev_emb,
-                    atten
-                ],
-                dim=1
-            )
-            
-            prev_h, prev_c = nmt.decoder.lstm_cell(lstm_input, (prev_h, prev_c))
-            
-            log_prob = nmt.decoder.generator(prev_h)
-
-            _, prev_word = torch.max(log_prob)
-        
-            if prev_word == '<\s>':
-                break
-            else:
-                word_list.append(trg_vocab.itos(prev_word))
-            
-            i+=1
-
-        with open(options.output, 'a+') as f:
-            f.write(' '.join(word_list) + '\n')
-
-        sys.stderr.write(' '.join(word_list) + '\n')
+    sys.stderr.write(' '.join(trans_sent) + '\n')
         
 
 

@@ -1,9 +1,9 @@
 #!/bin/bash
-origin_data="../../../mt-hw5-data"
+origin_data="/Users/sudamonster/Downloads/drive-download-20171115T184743Z-001"
 nmt_path=".."
 mkdir -p data
 
-source activate NeuralHawkes
+source activate pytorch_27
 
 python ${nmt_path}/preprocess.py \
     --train_file ${origin_data}/trn.de \
