@@ -55,61 +55,81 @@ class GlobalAttention(nn.Module):
         super(GlobalAttention, self).__init__()
         self.dim_rnn = opts['dim_rnn']
 
+        self.linear_in = nn.Linear(2 * self.dim_rnn, 2 * self.dim_rnn, bias=False)
         self.linear_out = nn.Linear(4 * self.dim_rnn, 2 * self.dim_rnn, bias=False)
+        self.softmax= nn.Softmax()
+        self.tanh = nn.Tanh()
+    
+    def score(self, h_t, h_s):
+        """
+        h_t (FloatTensor): batch x tgt_len x dim
+        h_s (FloatTensor): batch x src_len x dim
+        returns scores (FloatTensor): batch x tgt_len x src_len:
+            raw attention scores for each src index
+        """
+        src_batch, src_len, src_dim = h_s.size()
+        tgt_batch, tgt_len, tgt_dim = h_t.size()
 
-        self.dropout = nn.Dropout(p=opts['dropout'])
+        h_t_ = h_t.view(tgt_batch * tgt_len, tgt_dim)
+        h_t_ = self.linear_in(h_t_)
+        h_t = h_t_.view(tgt_batch, tgt_len, tgt_dim)
+        h_s_ = h_s.transpose(1, 2)
+        # (batch, t_len, d) x (batch, d, s_len) --> (batch, t_len, s_len)
+
+        return torch.bmm(h_t, h_s_)
 
     def forward(
         self,
-        seq_context, 
-        seq_context_after_liner, 
-        src_mask, 
-        prev_hidden
+        trg_hidden,
+        context,
+        src_mask
     ):
-        # seq_score shape [seq_len, batch_size]
-        #import pdb; pdb.set_trace()
+        context = context.transpose(0, 1)
+        trg_hidden = trg_hidden.unsqueeze(0).transpose(0, 1)
         
-        #print(seq_context_after_liner.size())
-        #print(prev_hidden.size())
-        #import pdb; pdb.set_trace()
-        seq_score = torch.exp(
-            torch.sum(
-                seq_context_after_liner * prev_hidden[None, :, :],
-                dim=2
+        batch, sourceL, dim = context.size()
+        batch_, targetL, dim_ = trg_hidden.size()
+
+        # align shape (batch, t_len, s_len)
+        align = self.score(trg_hidden, context)
+        
+        if src_mask is not None:
+            src_mask = src_mask.transpose(0, 1)
+            mask_ = src_mask.contiguous().view(batch, 1, sourceL)  # make it broardcastable
+            align.data.masked_fill_(1 - mask_.data, -float('inf'))
+            
+
+        align_vectors = self.softmax(
+            align.view(
+                batch * targetL, 
+                sourceL
             )
         )
-        #print(seq_score.size())
-        seq_score = seq_score * src_mask.float()
 
+        #print align_vectors
+        #raw_input()
+
+        align_vectors = align_vectors.view(batch, targetL, sourceL)
+
+        c = torch.bmm(align_vectors, context)
+
+        concat_c = torch.cat(
+            [
+                c, 
+                trg_hidden
+            ], 
+            dim=2
+        ).view(batch * targetL, dim*2)
         
-        seq_score_sum = torch.sum(seq_score, dim=0, keepdim=True)
-        seq_score_sum[seq_score_sum == 0] = 1
+        attn_h = self.linear_out(concat_c).view(batch, targetL, dim)
 
-        seq_score_norm = seq_score / seq_score_sum
+        attn_h = self.tanh(attn_h)
 
-        # seq_context shape [seq_len, batch_size, dim_model * 2]
-        #print(seq_score_norm.unsqueeze(2).size())
-        #print(seq_context.size())
-        weighted_sum_over_src = torch.sum(
-            seq_score_norm.unsqueeze(2) * seq_context,
-            dim=0
-        )
-
-        #print(weighted_sum_over_src.size())
-        #print(prev_hidden[0].size())
+        return attn_h.squeeze(1)
         
-        attn = torch.tanh(
-            self.linear_out(
-                torch.cat(
-                    [
-                        weighted_sum_over_src,
-                        prev_hidden
-                    ],
-                    dim=1
-                )
-            )
-        )
-        return self.dropout(attn)
+        
+
+
 
 class Generater(nn.Module):
     def __init__(self, opts):
@@ -159,39 +179,6 @@ class Decoder(nn.Module):
         
         self.dim_rnn = opts['dim_rnn']
 
-        self.init_hidden = Variable(
-            torch.zeros(
-                1,
-                2 * self.dim_rnn
-            ),
-            requires_grad=False
-        )
-        '''
-        
-        self.init_cell = Variable(
-            torch.zeros(
-                1,
-                2 * self.dim_rnn
-            ),
-            requires_grad=False
-        )
-
-        self.linear_in = nn.Parameter(
-            torch.FloatTensor(
-                2 * self.dim_rnn, 
-                2 * self.dim_rnn
-            )
-        )
-
-        self.linear_out = nn.Parameter(
-            torch.FloatTensor(
-                2 * self.dim_rnn, 
-                2 * self.dim_rnn
-            )
-        )
-        '''
-
-
         self.lstm_cell = nn.LSTMCell(
             input_size=2 * opts['dim_rnn'] + opts['dim_emb'],
             hidden_size= 2 * opts['dim_rnn']
@@ -202,8 +189,6 @@ class Decoder(nn.Module):
             2 * self.dim_rnn, 
             bias=False
         )
-
-        self.generator = Generater(opts)
 
         self.dropout = nn.Dropout(p=opts['dropout']) 
         
@@ -220,7 +205,7 @@ class Decoder(nn.Module):
         '''
 
         prev_h , prev_c = final_states_encoder
-
+        # initial states
         prev_h = torch.cat(
             [
                 prev_h[0:prev_h.size(0):2], 
@@ -237,48 +222,48 @@ class Decoder(nn.Module):
             dim=2
         )[0]
 
-        h_list = []
+        output = Variable(seq_context.data.new(batch_size, self.dim_rnn * 2))
+
+        decoder_output_list = []
         log_prob_list = []
-        #print(prev_h.size())
-        for i in range(1, max_len_trg):
-            atten = self.attn_layer(
-                seq_context,
-                seq_context_after_liner, 
-                src_mask,
-                prev_h
-            )
-            #print(atten.size())    
+
+        for i in range(max_len_trg - 1):
             lstm_input = torch.cat(
                 [
-                    seq_trg_emb[i - 1],
-                    atten
+                    seq_trg_emb[i],
+                    output
                 ],
                 dim=1
             )
-            #print(lstm_input.size())
-            prev_h = self.dropout(prev_h)
-            prev_c = self.dropout(prev_c)
-            #print(prev_c.size())
-            #print(prev_h.size())
-            #print(lstm_input.size())
-            prev_h, prev_c = self.lstm_cell(lstm_input, (prev_h, prev_c))
-            
-            #h_list.append(prev_h.unsqueeze(0))
-            log_prob_list.append(self.generator(prev_h).unsqueeze(0))
-        
-        seq_trg_log_prob = torch.cat(log_prob_list, dim=0)
-        #seq_hidden_trg = torch.cat(h_list, dim=0)
-        
-        #seq_trg_log_prob = self.generator(seq_hidden_trg)
 
-        return seq_trg_log_prob
+            prev_h, prev_c = self.lstm_cell(
+                lstm_input, 
+                (prev_h, prev_c)
+            )
+            
+            output = self.attn_layer(
+                prev_h,
+                seq_context,
+                src_mask
+            )
+
+            output = self.dropout(output)
+            
+            decoder_output_list.append(output.unsqueeze(0))
+        
+        # decoder_output seq_len * batch * rnn_dim
+        decoder_output = torch.cat(decoder_output_list, dim=0)
+
+        return decoder_output
     
 
 class NMT(nn.Module):
     def __init__(self, opts):
         super(NMT, self).__init__()
+        self.dim_rnn = opts['dim_rnn']
         self.encoder = Encoder(opts)
         self.decoder = Decoder(opts)
+        self.generator = Generater(opts)
     
     def forward(self,         
         src_batch,
@@ -286,7 +271,13 @@ class NMT(nn.Module):
         src_mask,
         trg_mask):
         seq_context, final_states = self.encoder(src_batch, src_mask)
-        seq_trg_log_prob = self.decoder(seq_context, src_mask, trg_batch, final_states)
+        decoder_output = self.decoder(seq_context, src_mask, trg_batch, final_states)
+        
+        trg_len, batch_size, decoder_dim = decoder_output.size()
+        
+        seq_trg_log_prob = self.generator(
+            decoder_output.view(trg_len * batch_size, -1)
+        ).view(trg_len, batch_size, -1)
 
         return seq_trg_log_prob
     
@@ -317,12 +308,90 @@ class NMT(nn.Module):
         self.decoder.lstm_cell.weight_ih.data = params['decoder.rnn.layers.0.weight_ih']
         self.decoder.lstm_cell.bias_ih.data = params['decoder.rnn.layers.0.bias_ih']
 
-        self.decoder.linear_in.weight.data = params['decoder.attn.linear_in.weight'].transpose(0, 1)
+        #self.decoder.linear_in.weight.data = params['decoder.attn.linear_in.weight'].transpose(0, 1)
+        self.decoder.attn_layer.linear_in.weight.data = params['decoder.attn.linear_in.weight']
         self.decoder.attn_layer.linear_out.weight.data = params['decoder.attn.linear_out.weight']
 
-        self.decoder.generator.generate_linear.weight.data = params['0.weight']
-        self.decoder.generator.generate_linear.bias.data = params['0.bias']
+        self.generator.generate_linear.weight.data = params['0.weight']
+        self.generator.generate_linear.bias.data = params['0.bias']
+    
+    def decode(self, src_sent, trg_vocab):
+        #print src_sent
+        #print type(src_sent)
+        src_sent = Variable(src_sent[:, None])
+        seq_context, final_states = self.encoder(src_sent, None)
+
+        prev_h , prev_c = final_states
         
+        # initial states
+        prev_h = torch.cat(
+            [
+                prev_h[0:prev_h.size(0):2], 
+                prev_h[1:prev_h.size(0):2]
+            ], 
+            dim=2
+        )[0]
+
+        prev_c = torch.cat(
+            [
+                prev_c[0:prev_c.size(0):2], 
+                prev_c[1:prev_c.size(0):2]
+            ], 
+            dim=2
+        )[0]
+
+        output = Variable(seq_context.data.new(1, self.dim_rnn * 2))
+
+        decoder_output_list = []
+        log_prob_list = []
+
+        w = Variable(
+            torch.LongTensor(1)
+        )
+        w[0] = trg_vocab.stoi['<s>']
+
+        w_list = []
+
+        i = 0
+
+        while i < 100 :
+            emb_w = self.decoder.embedding(w)
+            #print emb_w, output
+            lstm_input = torch.cat(
+                [
+                    emb_w,
+                    output
+                ],
+                dim=1
+            )
+
+            prev_h, prev_c = self.decoder.lstm_cell(
+                lstm_input, 
+                (prev_h, prev_c)
+            )
+            
+            output = self.decoder.attn_layer(
+                prev_h,
+                seq_context,
+                None
+            )
+
+            output = self.decoder.dropout(output)
+            
+            log_prob = self.generator(output)
+
+            _, w = torch.max(log_prob, dim=1)
+
+            if w.data[0] == trg_vocab.stoi['</s>']:
+                break
+            
+            w_list.append(trg_vocab.itos[w.data[0]])
+
+            
+        
+        return ' '.join(w_list)
+        
+
         
         
     
