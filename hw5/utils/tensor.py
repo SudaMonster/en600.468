@@ -36,7 +36,7 @@ def advanced_batchize(data, batch_size, pad_index):
   """
   # rank by data length
   #raw_input()
-  data = [sent for sent in data if len(sent) < 80 ]
+  #data = [sent for sent in data if len(sent) < 80 ]
   sorted_data = sorted(data, key=lambda sent: len(sent))[::-1]
   sort_index = sorted(range(len(data)), key=lambda k: len(data[k]))[::-1]
   batchized_data = []

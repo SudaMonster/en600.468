@@ -11,6 +11,7 @@ from torch.autograd import Variable
 import math
 from model import NMT
 import sys
+import os
 #from example_module import NMT
 
 logging.basicConfig(
@@ -50,14 +51,17 @@ def main(options):
     
     nmt.eval()
   
-   
-    for src_sent in src_test:
+    os.system("rm -f {}".format(options.model + '.out'))
+    for src_sent_ in src_test:
+        src_sent = Variable(src_sent_[:, None]) 
+        if use_cuda > 0:
+            src_sent = src_sent.cuda()
         trans_sent = nmt.decode(src_sent, trg_vocab)
+    
+        with open(options.model+ '.out', 'a+') as f:
+            f.write(trans_sent + '\n')
 
-    with open(options.output, 'a+') as f:
-        f.write(' '.join(trans_sent) + '\n')
-
-    sys.stderr.write(' '.join(trans_sent) + '\n')
+        sys.stderr.write(trans_sent + '\n')
         
 
 

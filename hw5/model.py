@@ -6,7 +6,7 @@ class Embedding(nn.Module):
     def __init__(self,
         voc_size,        
         dim_emb,
-        dropout=0.5
+        dropout
         ):
         super(Embedding, self).__init__()
         self.look_up = nn.Embedding(
@@ -96,7 +96,7 @@ class GlobalAttention(nn.Module):
         if src_mask is not None:
             src_mask = src_mask.transpose(0, 1)
             mask_ = src_mask.contiguous().view(batch, 1, sourceL)  # make it broardcastable
-            align.data.masked_fill_(1 - mask_.data, -float('inf'))
+            align.data.masked_fill_(1 - mask_.data, - 1.0 * 1e6)
             
 
         align_vectors = self.softmax(
@@ -106,7 +106,7 @@ class GlobalAttention(nn.Module):
             )
         )
 
-        #print align_vectors
+        #print align_vectors[0]
         #raw_input()
 
         align_vectors = align_vectors.view(batch, targetL, sourceL)
@@ -140,20 +140,6 @@ class Generater(nn.Module):
             opts['trg_voc_size']
         )
 
-    '''
-    def log_softmax(self, input_tensor):
-        input_max, _ = torch.max(input_tensor, dim=2, keepdim=True)
-        logsumexp_term = torch.log(
-            1e-9 + torch.sum(
-                torch.exp(
-                    input_tensor - input_max,
-                    ),
-                dim=2,
-                keepdim=True
-                )
-            ) + input_max
-        return input_tensor - logsumexp_term
-    '''
     def forward(self, input_tensor):
         assert len(input_tensor.size()) == 2
         return nn.functional.log_softmax(
@@ -184,12 +170,6 @@ class Decoder(nn.Module):
             hidden_size= 2 * opts['dim_rnn']
         )
 
-        self.linear_in = nn.Linear(
-            2 * self.dim_rnn, 
-            2 * self.dim_rnn, 
-            bias=False
-        )
-
         self.dropout = nn.Dropout(p=opts['dropout']) 
         
     def forward(self, seq_context, src_mask, seq_trg, final_states_encoder):
@@ -197,15 +177,10 @@ class Decoder(nn.Module):
         batch_size = seq_trg.size(1)
 
         seq_trg_emb = self.embedding(seq_trg)
-        seq_context_after_liner = self.linear_in(seq_context)
         
-        '''
-        prev_h = self.init_hidden.expand(batch_size, 2 * self.dim_rnn)
-        prev_c = self.init_cell.expand(batch_size, 2 * self.dim_rnn)
-        '''
-
         prev_h , prev_c = final_states_encoder
         # initial states
+        '''
         prev_h = torch.cat(
             [
                 prev_h[0:prev_h.size(0):2], 
@@ -221,12 +196,15 @@ class Decoder(nn.Module):
             ], 
             dim=2
         )[0]
-
-        output = Variable(seq_context.data.new(batch_size, self.dim_rnn * 2))
+        '''
+        prev_h = torch.cat(prev_h, 1)
+        prev_c = torch.cat(prev_c, 1)
+        output = prev_h
+        #output = Variable(seq_context.data.new(batch_size, self.dim_rnn * 2))
 
         decoder_output_list = []
-        log_prob_list = []
-
+        
+        #decoder_output_list.append(output.unsqueeze(0))
         for i in range(max_len_trg - 1):
             lstm_input = torch.cat(
                 [
@@ -235,6 +213,9 @@ class Decoder(nn.Module):
                 ],
                 dim=1
             )
+
+            prev_h = Variable(prev_h.data)
+            prev_c = Variable(prev_c.data)
 
             prev_h, prev_c = self.lstm_cell(
                 lstm_input, 
@@ -315,10 +296,9 @@ class NMT(nn.Module):
         self.generator.generate_linear.weight.data = params['0.weight']
         self.generator.generate_linear.bias.data = params['0.bias']
     
-    def decode(self, src_sent, trg_vocab):
+    def decode(self, src_sent, trg_vocab, gpu=True):
         #print src_sent
         #print type(src_sent)
-        src_sent = Variable(src_sent[:, None])
         seq_context, final_states = self.encoder(src_sent, None)
 
         prev_h , prev_c = final_states
@@ -348,13 +328,20 @@ class NMT(nn.Module):
         w = Variable(
             torch.LongTensor(1)
         )
+
+        if gpu:
+            w = w.cuda()
+
         w[0] = trg_vocab.stoi['<s>']
 
         w_list = []
 
         i = 0
 
-        while i < 100 :
+        while i < 80 :
+            
+            i += 1
+
             emb_w = self.decoder.embedding(w)
             #print emb_w, output
             lstm_input = torch.cat(
@@ -389,7 +376,8 @@ class NMT(nn.Module):
 
             
         
-        return ' '.join(w_list)
+        
+        return u' '.join(w_list).encode('utf-8')
         
 
         
