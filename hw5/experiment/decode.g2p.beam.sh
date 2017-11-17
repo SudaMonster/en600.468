@@ -18,7 +18,7 @@ CPATH=/export/b18/xma/libs/cudnn-6/cuda/include
 LIBRARY_PATH=/export/b18/xma/libs/cudnn-6/cuda/lib64
 
 #mkdir -p model
-CUDA_VISIBLE_DEVICES=${device} python ${tool}/decode.ensemble.py \
+CUDA_VISIBLE_DEVICES=${device} python ${tool}/decode.beam.py \
     --data_file ${data_path} \
     --model $@ \
     --src_lang words \
